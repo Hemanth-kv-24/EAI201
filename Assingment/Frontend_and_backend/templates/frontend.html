@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Campus Navigator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 1.5rem;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 0;
+            height: calc(100vh - 80px);
+        }
+
+        .sidebar {
+            background: white;
+            padding: 1.5rem;
+            border-right: 1px solid #e1e8ed;
+            overflow-y: auto;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .btn:hover {
+            background: #2980b9;
+        }
+
+        .result {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border-radius: 8px;
+            background: #ecf0f1;
+            display: none;
+        }
+
+        .result.success {
+            background: #d5f4e6;
+            border-left: 4px solid #2ecc71;
+        }
+
+        .result.error {
+            background: #fadbd8;
+            border-left: 4px solid #e74c3c;
+        }
+
+        .path-display {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+        }
+
+        .distance {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+
+        .map-container {
+            height: 100%;
+            position: relative;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .location-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .dot-start { background: #2ecc71; }
+        .dot-end { background: #e74c3c; }
+        .dot-path { background: #3498db; }
+
+        .algorithm-info {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Campus Navigator</h1>
+        <p>Find the shortest path between locations</p>
+    </div>
+
+    <div class="container">
+        <div class="sidebar">
+            <form id="pathForm">
+                <div class="form-group">
+                    <label for="start">
+                        <span class="location-dot dot-start"></span>
+                        Start Location
+                    </label>
+                    <select id="start" required>
+                        <option value="">Choose starting point</option>
+                        {% for location in locations %}
+                            <option value="{{ location }}">{{ location }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="goal">
+                        <span class="location-dot dot-end"></span>
+                        Destination
+                    </label>
+                    <select id="goal" required>
+                        <option value="">Choose destination</option>
+                        {% for location in locations %}
+                            <option value="{{ location }}">{{ location }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="algorithm">Pathfinding Algorithm</label>
+                    <select id="algorithm" required>
+                        <option value="bfs">Breadth-First Search (BFS)</option>
+                        <option value="dfs">Depth-First Search (DFS)</option>
+                        <option value="ucs">Uniform Cost Search (UCS)</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="btn">Find Path</button>
+            </form>
+
+            <div id="result" class="result">
+                <div class="path-display" id="pathResult"></div>
+                <div class="distance" id="costResult"></div>
+            </div>
+
+            <div class="algorithm-info">
+                <strong>Algorithm Tips:</strong><br>
+                • <strong>BFS</strong>: Finds shortest path in terms of steps<br>
+                • <strong>DFS</strong>: Explores one branch completely first<br>
+                • <strong>UCS</strong>: Finds shortest path by actual distance
+            </div>
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <script>
+        // Simple map initialization
+        const map = L.map('map').setView([13.223, 77.756], 16);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Updated coordinates with your new locations
+        const locations = {
+            "Main Gate": [13.2200, 77.7539],
+            "ID gate": [13.2214, 77.7549],
+            "AC1": [13.2218, 77.7550],  // Assuming AC1 is Flag Pole
+            "ACB1-LW": [13.2222, 77.7552],  // Assuming ACB1-LW is Admin Block
+            "Cafe": [13.22242, 77.755158],  // Assuming Cafe is Cafeteria
+            "Lawn area": [13.222775, 77.755576],  // Assuming Lawn area is Loun Area
+            "Library": [13.221971, 77.75558],
+            "Ac-Block2": [13.22336, 77.755963],  // Assuming Ac-Block2 is Block 2
+            "Hostel": [13.224195, 77.758613],
+            "Food Court": [13.224758, 77.75725],
+            "Sports Area": [13.22887, 77.7572]
+        };
+
+        let markers = {};
+        let pathLayer = null;
+        let startMarker = null;
+        let endMarker = null;
+
+        // Add simple circle markers
+        Object.entries(locations).forEach(([name, coords]) => {
+            const marker = L.circleMarker(coords, {
+                radius: 8,
+                fillColor: '#3498db',
+                color: '#fff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map);
+
+            marker.bindPopup(`
+                <div style="text-align: center;">
+                    <strong>${name}</strong><br>
+                    <button onclick="setLocation('start', '${name}')" 
+                            style="background: #2ecc71; color: white; border: none; padding: 5px 10px; margin: 2px; border-radius: 4px; cursor: pointer;">
+                        Start
+                    </button>
+                    <button onclick="setLocation('end', '${name}')" 
+                            style="background: #e74c3c; color: white; border: none; padding: 5px 10px; margin: 2px; border-radius: 4px; cursor: pointer;">
+                        End
+                    </button>
+                </div>
+            `);
+
+            // Add label
+            L.tooltip({ permanent: true, direction: 'top' })
+                .setContent(name)
+                .setLatLng([coords[0] + 0.0001, coords[1]])
+                .addTo(map);
+
+            markers[name] = marker;
+        });
+
+        function setLocation(type, name) {
+            const element = type === 'start' ? 'start' : 'goal';
+            document.getElementById(element).value = name;
+            updateMarker(type, name);
+        }
+
+        function updateMarker(type, name) {
+            if (type === 'start') {
+                if (startMarker) map.removeLayer(startMarker);
+                startMarker = L.circleMarker(locations[name], {
+                    radius: 10,
+                    fillColor: '#2ecc71',
+                    color: '#fff',
+                    weight: 3
+                }).addTo(map);
+            } else {
+                if (endMarker) map.removeLayer(endMarker);
+                endMarker = L.circleMarker(locations[name], {
+                    radius: 10,
+                    fillColor: '#e74c3c',
+                    color: '#fff',
+                    weight: 3
+                }).addTo(map);
+            }
+        }
+
+        function drawPath(path) {
+            if (pathLayer) map.removeLayer(pathLayer);
+            
+            if (path && path.length > 1) {
+                const latlngs = path.map(location => locations[location]);
+                pathLayer = L.polyline(latlngs, {
+                    color: '#3498db',
+                    weight: 4,
+                    opacity: 0.7
+                }).addTo(map);
+                
+                map.fitBounds(pathLayer.getBounds());
+            }
+        }
+
+        // Form submission
+        document.getElementById('pathForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const start = document.getElementById('start').value;
+            const goal = document.getElementById('goal').value;
+            const algorithm = document.getElementById('algorithm').value;
+            
+            if (!start || !goal) {
+                showResult('Please select both start and end locations', false);
+                return;
+            }
+
+            try {
+                const response = await fetch('/find_path', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ start, goal, algorithm })
+                });
+
+                const data = await response.json();
+                const result = document.getElementById('result');
+                const pathResult = document.getElementById('pathResult');
+                const costResult = document.getElementById('costResult');
+
+                if (data.success) {
+                    pathResult.innerHTML = `📍 ${data.path.join(' → ')}`;
+                    costResult.innerHTML = data.cost ? `📏 Distance: ${data.cost} meters` : '';
+                    showResult('', true);
+                    drawPath(data.path);
+                    updateMarker('start', start);
+                    updateMarker('end', goal);
+                } else {
+                    showResult(data.error || 'No path found', false);
+                    if (pathLayer) map.removeLayer(pathLayer);
+                }
+            } catch (error) {
+                showResult('Error finding path. Please try again.', false);
+            }
+        });
+
+        function showResult(message, isSuccess) {
+            const result = document.getElementById('result');
+            result.style.display = 'block';
+            result.className = isSuccess ? 'result success' : 'result error';
+            
+            if (!isSuccess && message) {
+                document.getElementById('pathResult').textContent = message;
+                document.getElementById('costResult').textContent = '';
+            }
+        }
+
+        // Update markers when dropdown changes
+        document.getElementById('start').addEventListener('change', function() {
+            if (this.value) updateMarker('start', this.value);
+        });
+
+        document.getElementById('goal').addEventListener('change', function() {
+            if (this.value) updateMarker('end', this.value);
+        });
+    </script>
+</body>
+</html>
